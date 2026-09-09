@@ -28,7 +28,6 @@ resource "kubernetes_replication_controller" "app-master" {
                     }
 
                     resources {
-                        # bug: requests must be requests = { } for validate
                         requests = {
                             cpu    = "100m"
                             memory = "100Mi"
@@ -39,29 +38,28 @@ resource "kubernetes_replication_controller" "app-master" {
                     image = "theharbormaster/banking-on-spring-boot-3-5:latest"
                     name  = "app-container"
 
-                port {
-                    container_port = 8080
-                }
-                env {
-                    name  = "DATABASE_DIALECT"
-                    value = "com.mysql.cj.jdbc.Driver"
-                }
-                env {
-                    name  = "DATABASE_URL"
-                    value = "jdbc:mysql://db:3306/developmentdb?createDatabaseIfNotExist=true&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true"
-                }
-                env {
-                    name  = "DATABASE_PASSWORD"
-                    value = "letmein2"
-                }
-                resources {
-                    # bug: requests must be requests = { } for validate
-                    requests = {
-                        cpu    = "100m"
-                        memory = "100Mi"
+                    port {
+                        container_port = 8080
+                    }
+                    env {
+                        name  = "DATABASE_DIALECT"
+                        value = "com.mysql.cj.jdbc.Driver"
+                    }
+                    env {
+                        name  = "DATABASE_URL"
+                        value = "jdbc:mysql://db:3306/developmentdb?createDatabaseIfNotExist=true&autoReconnect=true&useSSL=false&allowPublicKeyRetrieval=true"
+                    }
+                    env {
+                        name  = "DATABASE_PASSWORD"
+                        value = "letmein2"
+                    }
+                    resources {
+                        requests = {
+                            cpu    = "100m"
+                            memory = "100Mi"
+                        }
                     }
                 }
-                } # bug: missing closing brace on second container blocked validate
             }
         }
 

@@ -11,7 +11,6 @@ module "k8s" {
 
 provider "kubernetes" {
     host = aws_eks_cluster.this.endpoint
-    # bug: use certificate_authority[0].data (certificate_authority_data is invalid)
     cluster_ca_certificate = base64decode(
      aws_eks_cluster.this.certificate_authority[0].data
     )

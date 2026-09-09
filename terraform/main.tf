@@ -12,7 +12,7 @@ provider "aws" {
       CreatedBy = "Harbormaster"
       Blueprint = "Spring Boot 3.5"
       DomainModel = "Banking Industry Domain Model"
-      CertificationId = "529d1ea0-be42-45c7-a6ba-c2d2bdd7012d"
+      CertificationId = "41df5e36-9b1a-4026-9025-18e8abcb6568"
     }
   }
 }
@@ -39,7 +39,7 @@ resource "local_file" "private_key_pem" {
 }
 
 resource "aws_key_pair" "generated" {
-  key_name   = "pjsk-sshtest-0.5630975597716833"
+  key_name   = "pjsk-sshtest-0.9783400913880959"
   public_key = tls_private_key.generated.public_key_openssh
 
   lifecycle {
@@ -56,34 +56,29 @@ resource "aws_vpc" "default" {
   cidr_block = "10.0.0.0/16"
 }
 
-# bug: EKS needs subnets in 2 AZs
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
 resource "aws_subnet" "default" {
-  vpc_id                  = aws_vpc.default.id
-  cidr_block              = "10.0.1.0/24"
+  vpc_id     = aws_vpc.default.id
+  cidr_block = "10.0.1.0/24"
   availability_zone       = data.aws_availability_zones.available.names[0]
-  # bug: map public IP so EC2 can SSH / remote-exec
   map_public_ip_on_launch = true
 }
 
-# bug: second subnet in another AZ for EKS + RDS subnet group
 resource "aws_subnet" "secondary" {
   vpc_id            = aws_vpc.default.id
   cidr_block        = "10.0.2.0/24"
   availability_zone = data.aws_availability_zones.available.names[1]
 }
 
-# bug: IGW + public route so EC2 public IP works (SSH host was empty)
 resource "aws_internet_gateway" "default" {
   vpc_id = aws_vpc.default.id
 }
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.default.id
-
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.default.id
@@ -170,7 +165,7 @@ resource "aws_security_group" "db" {
 }
 
 resource "aws_db_instance" "default" {
-  depends_on             = [aws_security_group.db, aws_db_subnet_group.default]
+  depends_on             = [aws_security_group.db]
 #  identifier             = "bankingbackend-rds" # Terraform will create a unique id if not assigned
   allocated_storage      = 20
   engine                 = "mysql"
@@ -178,9 +173,10 @@ resource "aws_db_instance" "default" {
   db_name                = "bankingbackend"
   username               = "no_user_name"
   password               = "no_password"
-  db_subnet_group_name   = aws_db_subnet_group.default.name # bug: wire RDS to VPC subnet group
   vpc_security_group_ids = [aws_security_group.db.id]
+  db_subnet_group_name   = aws_db_subnet_group.default.name # bug: wire RDS to VPC subnet group
   skip_final_snapshot    = true # bug: allow terraform destroy without final snapshot prompt
+
 }
  
 # -------------------------------------------------------
@@ -202,7 +198,6 @@ resource "aws_iam_role" "eks" {
   })
 }
 
-# bug: EKS cluster role needs AmazonEKSClusterPolicy
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
   role       = aws_iam_role.eks.name
@@ -211,12 +206,10 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
 resource "aws_eks_cluster" "this" {
   name     = "eks_cluster_bankingbackend"
   role_arn = aws_iam_role.eks.arn
-
   vpc_config {
-    # bug: EKS requires subnet IDs in at least 2 AZs
+    # EKS requires subnet IDs in at least 2 AZs
     subnet_ids = [aws_subnet.default.id, aws_subnet.secondary.id]
   }
-
   depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
 }
 
@@ -234,7 +227,6 @@ resource "aws_instance" "web" {
     # The default username for our ec2 instance
     type = "ssh"
     host = self.public_ip
-    # bug: AMI is Amazon Linux — use ec2-user (not ubuntu)
     user = "ec2-user"
     private_key = tls_private_key.generated.private_key_pem
   }
@@ -264,10 +256,9 @@ resource "aws_instance" "web" {
   # -------------------------------------------------------
   # Our Security group to allow HTTP and SSH access
   # -------------------------------------------------------
-  # bug: place EC2 in public subnet + associate public IP for SSH
+  vpc_security_group_ids = [aws_security_group.web.id]
   subnet_id                   = aws_subnet.default.id
   associate_public_ip_address = true
-  vpc_security_group_ids      = [aws_security_group.web.id]
 
   # -------------------------------------------------------
   # remote execution commands
@@ -275,12 +266,10 @@ resource "aws_instance" "web" {
 
   provisioner "remote-exec" {
     inline = [
-      # bug: Amazon Linux uses dnf; install/enable Docker (apt-get/ubuntu scripts fail)
       "sudo dnf -y install docker",
       "sudo systemctl enable --now docker",
       "sudo docker login --username tylertravismya --password 69Cutlass",
       "sudo docker pull theharbormaster/banking-on-spring-boot-3-5:latest",
-      # bug: docker run -d so remote-exec does not hang on foreground container
       "sudo docker run -d -p 8000:8000 -p 8080:8080 -e DATABASE_URL=jdbc:mysql://${aws_db_instance.default.endpoint}/bankingbackend theharbormaster/banking-on-spring-boot-3-5:latest"
     ]
   }
@@ -288,7 +277,6 @@ resource "aws_instance" "web" {
 
 output "ssh_command" {
   description = "Command to use to SSH into the instance."
-  # bug: match Amazon Linux user ec2-user
   value = "ssh -i ${local.private_key_filename} ec2-user@${aws_instance.web.public_ip}"
 }
 

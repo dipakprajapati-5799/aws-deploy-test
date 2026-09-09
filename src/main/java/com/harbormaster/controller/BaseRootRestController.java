@@ -31,7 +31,7 @@ public class BaseRootRestController extends BaseSpringRestController {
 
     @GetMapping("/")
     public ResponseEntity<String> root() {
-        return ResponseEntity.ok("banking-backend is running.");
+        return ResponseEntity.ok("bankingbackend is running.");
     }
 
     @GetMapping("/system")
