@@ -3,7 +3,6 @@ package com.harbormaster.config;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 
@@ -17,9 +16,12 @@ public class SecurityConfiguration {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http)
             throws Exception {
-                        http
-                            .authorizeHttpRequests(auth -> auth
-                            .anyRequest().authenticated());
+        // # bug: generated used .anyRequest().authenticated() with auth=none,
+        // which blocks /actuator/health and fails spring-runtime Wait For Startup.
+        http
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth
+                .anyRequest().permitAll());
 
         return http.build();
     }

@@ -1,4 +1,5 @@
-FROM eclipse-temurin:11-jre-alpine
+# # bug: generated used Java 11; Spring Boot 3.5 app is Java 17 → UnsupportedClassVersionError in container
+FROM eclipse-temurin:17-jre-alpine
 
 LABEL org.opencontainers.image.vendor="Harbormaster"
 LABEL org.opencontainers.image.title="banking-backend"

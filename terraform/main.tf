@@ -203,6 +203,7 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   role       = aws_iam_role.eks.name
 }
 
+# # bug: EKS cluster created with no node group → no workers; K8s RC/Service LB health stays empty
 resource "aws_eks_cluster" "this" {
   name     = "eks_cluster_bankingbackend"
   role_arn = aws_iam_role.eks.arn
