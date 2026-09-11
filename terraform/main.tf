@@ -71,6 +71,8 @@ resource "aws_subnet" "secondary" {
   vpc_id            = aws_vpc.default.id
   cidr_block        = "10.0.2.0/24"
   availability_zone = data.aws_availability_zones.available.names[1]
+  # # bug: secondary subnet used by EKS had no public IP mapping; nodes need outbound access to join/pull images
+  map_public_ip_on_launch = true
 }
 
 resource "aws_internet_gateway" "default" {
@@ -87,6 +89,12 @@ resource "aws_route_table" "public" {
 
 resource "aws_route_table_association" "default" {
   subnet_id      = aws_subnet.default.id
+  route_table_id = aws_route_table.public.id
+}
+
+# # bug: secondary AZ subnet was not associated to the public route table; EKS node group needs both subnets online
+resource "aws_route_table_association" "secondary" {
+  subnet_id      = aws_subnet.secondary.id
   route_table_id = aws_route_table.public.id
 }
 
@@ -214,6 +222,62 @@ resource "aws_eks_cluster" "this" {
   depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
 }
 
+# # bug: IAM role required for EKS managed node group worker nodes
+resource "aws_iam_role" "eks_node" {
+  name = "eks-node-group-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ec2.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+}
+
+# # bug: attach AmazonEKSWorkerNodePolicy to EKS node role
+resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_node.name
+}
+
+# # bug: attach AmazonEKS_CNI_Policy to EKS node role
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_node.name
+}
+
+# # bug: attach AmazonEC2ContainerRegistryReadOnly to EKS node role
+resource "aws_iam_role_policy_attachment" "eks_ecr_readonly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.eks_node.name
+}
+
+# # bug: add managed node group so workloads run and K8s LB health can be checked
+resource "aws_eks_node_group" "this" {
+  cluster_name    = aws_eks_cluster.this.name
+  node_group_name = "bankingbackend-node-group"
+  node_role_arn   = aws_iam_role.eks_node.arn
+  subnet_ids      = [aws_subnet.default.id, aws_subnet.secondary.id]
+
+  scaling_config {
+    desired_size = 1
+    max_size     = 2
+    min_size     = 1
+  }
+
+  instance_types = ["t3.medium"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_worker_node_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.eks_ecr_readonly,
+  ]
+}
+
 # -------------------------------------------------------
 # ec2 instance
 # -------------------------------------------------------
@@ -269,9 +333,11 @@ resource "aws_instance" "web" {
     inline = [
       "sudo dnf -y install docker",
       "sudo systemctl enable --now docker",
-      "sudo docker login --username tylertravismya --password 69Cutlass",
+      # # bug: docker login failure aborted remote-exec before pull/run; public Hub image does not need login
+      # # bug: Hub image is Java 11 while app needs Java 17 — health fails until Hub image is rebuilt with Temurin 17
       "sudo docker pull theharbormaster/banking-on-spring-boot-3-5:latest",
-      "sudo docker run -d -p 8000:8000 -p 8080:8080 -e DATABASE_URL=jdbc:mysql://${aws_db_instance.default.endpoint}/bankingbackend theharbormaster/banking-on-spring-boot-3-5:latest"
+      # # bug: pass Spring datasource env to RDS (user/password/url); restart policy so container stays up
+      "sudo docker run -d --restart unless-stopped -p 8000:8000 -p 8080:8080 -e SPRING_DATASOURCE_URL='jdbc:mysql://${aws_db_instance.default.address}:3306/bankingbackend?useSSL=false&allowPublicKeyRetrieval=true' -e SPRING_DATASOURCE_USERNAME='${aws_db_instance.default.username}' -e SPRING_DATASOURCE_PASSWORD='${aws_db_instance.default.password}' theharbormaster/banking-on-spring-boot-3-5:latest"
     ]
   }
 }
